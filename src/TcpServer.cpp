@@ -52,7 +52,7 @@ void TcpServer::run()
     _loops.reserve(loopCount);
     _loopThreads.reserve(loopCount);
     for (int i = 0; i < loopCount; ++i) {
-        auto loop = std::make_unique<EventLoop>(i, _ip, _port);
+        std::unique_ptr<EventLoop> loop(new EventLoop(i, _ip, _port));
         EventLoop* raw = loop.get();
         _loops.push_back(std::move(loop));
         _loopThreads.emplace_back([raw]() { raw->loop(); });
