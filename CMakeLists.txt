@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
 project(webserver LANGUAGES CXX)
 
-# C++17
-set(CMAKE_CXX_STANDARD 17)
+# C++11
+set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 编译选项: 打开所有警告, 开启 O2 优化
