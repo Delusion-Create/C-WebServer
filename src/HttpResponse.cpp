@@ -2,7 +2,7 @@
 #include <sstream>
 
 HttpResponse::HttpResponse()
-    : _statusCode(200), _statusMessage("OK"), _version("HTTP/1.1")
+    : _statusCode(200), _statusMessage("OK"), _version("HTTP/1.1"), _hasFile(false)
 {
 }
 
@@ -55,6 +55,22 @@ void HttpResponse::setBody(const char* body, size_t length)
     addHeader("Content-Length", std::to_string(_body.size()));
 }
 
+void HttpResponse::setFile(const std::string& path)
+{
+    _hasFile = true;
+    _filePath = path;
+}
+
+bool HttpResponse::hasFile() const
+{
+    return _hasFile;
+}
+
+const std::string& HttpResponse::filePath() const
+{
+    return _filePath;
+}
+
 std::string HttpResponse::toString() const
 {
     std::ostringstream stream;
@@ -67,6 +83,17 @@ std::string HttpResponse::toString() const
     return stream.str();
 }
 
+std::string HttpResponse::toStringHeaders() const
+{
+    std::ostringstream stream;
+    stream << _version << " " << _statusCode << " " << _statusMessage << "\r\n";
+    for (const auto& header : _headers) {
+        stream << header.first << ": " << header.second << "\r\n";
+    }
+    stream << "\r\n";
+    return stream.str();
+}
+
 void HttpResponse::clear()
 {
     _statusCode = 200;
@@ -74,4 +101,6 @@ void HttpResponse::clear()
     _version = "HTTP/1.1";
     _headers.clear();
     _body.clear();
+    _hasFile = false;
+    _filePath.clear();
 }

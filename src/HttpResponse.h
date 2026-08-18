@@ -21,8 +21,16 @@ public:
     void setBody(const std::string& body);
     void setBody(const char* body, size_t length);
 
-    // 序列化为完整 HTTP 响应报文
+    // 标记为文件响应: 序列化时只输出状态行+头部, 文件体由 sendfile 零拷贝发送
+    void setFile(const std::string& path);
+    bool hasFile() const;
+    const std::string& filePath() const;
+
+    // 序列化为完整 HTTP 响应报文(含请求体)
     std::string toString() const;
+
+    // 只序列化状态行 + 响应头 + 空行, 不含响应体(用于文件响应)
+    std::string toStringHeaders() const;
 
     void clear();
 
@@ -32,6 +40,8 @@ private:
     std::string _version;
     std::map<std::string, std::string> _headers;
     std::string _body;
+    bool _hasFile;
+    std::string _filePath;
 };
 
 #endif

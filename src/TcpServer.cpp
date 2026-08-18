@@ -165,7 +165,11 @@ void TcpServer::acceptConnection()
         ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
         epoll_ctl(_epfd, EPOLL_CTL_ADD, cfd, &ev);
 
-        auto conn = std::make_shared<HttpServer>(cfd, this);
+        // 记录客户端 IP(用于限流等按来源区分的策略)
+        char ipStr[INET_ADDRSTRLEN] = {0};
+        inet_ntop(AF_INET, &client_addr.sin_addr, ipStr, sizeof(ipStr));
+
+        auto conn = std::make_shared<HttpServer>(cfd, this, std::string(ipStr));
         {
             std::lock_guard<std::mutex> lock(_mapMutex);
             _clients[cfd] = conn;
@@ -188,12 +192,17 @@ void TcpServer::handleEvent(int fd, uint32_t events)
         conn = it->second;
     }
 
-    if (events & (EPOLLRDHUP | EPOLLHUP | EPOLLERR)) {
+    // 硬错误(EPOLLERR/EPOLLHUP): 直接关闭
+    if (events & (EPOLLERR | EPOLLHUP)) {
         closeConnection(fd);
         return;
     }
 
-    if (events & EPOLLIN) {
+    // EPOLLIN: 有可读数据; EPOLLRDHUP: 对端已关闭写端(半关闭)。
+    // 注意: 半关闭时接收队列中可能仍有未读数据, 不能直接 close(否则内核会
+    // 对带未读数据的 socket 发 RST)。必须让读任务把数据读完, recv 返回 0 后
+    // 再由连接自行干净关闭。
+    if (events & (EPOLLIN | EPOLLRDHUP)) {
         _pool.addTask([conn]() { conn->handleRead(); });
     }
     if (events & EPOLLOUT) {
