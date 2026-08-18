@@ -1,0 +1,16 @@
+# 构建产物
+build/
+out/
+*.o
+
+# 可执行文件
+src/webserver
+
+# 运行时日志
+*.log
+
+# IDE 配置
+.vscode/
+
+# 压测截图
+img/
