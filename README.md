@@ -1,6 +1,6 @@
 # C-WebServer
 
-基于 Linux 的 **C++17 高性能 HTTP 服务器**：**MultiReactor(one loop per core)** + epoll 边缘触发 +
+基于 Linux 的 **C++11 高性能 HTTP 服务器**：**MultiReactor(one loop per core)** + epoll 边缘触发 +
 非阻塞 IO + sendfile 零拷贝，实现 HTTP/1.1 协议处理、Keep-Alive 长连接管理、定时器超时回收、
 异步日志，并内置**静态文件服务**、**路由表**、**内存 KV 存储**与**令牌桶限流**。
 
@@ -147,7 +147,7 @@ si(软中断)≈21%。线程采样显示 **4 个 EventLoop 线程各占 53%~60% 
 - **短连接场景**：QPS 受 TCP 建连/拆除成本限制(TIME_WAIT/三次握手)，可用连接池或 HTTP/2 多路复用缓解
 - 暂不支持 chunked 传输编码、HTTPS/TLS；KV 无持久化；限流为进程内状态
 
-## 关键设计(面试点)
+## 关键设计
 
 - **one loop per thread**：每核一个事件循环，连接归属固定 loop，读写解析都在单线程内完成
   → 连接状态无锁，避免多线程竞争；配合 SO_REUSEPORT 实现内核级连接分发
