@@ -1,5 +1,5 @@
 #include "HttpServer.h"
-#include "TcpServer.h"
+#include "EventLoop.h"
 #include "Logger.h"
 #include "HttpRequest.h"
 #include "HttpResponse.h"
@@ -16,8 +16,9 @@
 #include <utility>
 #include <vector>
 
-// 单次 recv 的缓冲大小
-static const size_t RECV_BUF_SIZE = 4096;
+// 单次 recv 的缓冲大小: 较大的缓冲可以减少 ET 读尽循环的 recv 系统调用次数
+// (压测显示内核态 CPU 约占一半, 减少 syscall 是直接的优化方向)
+static const size_t RECV_BUF_SIZE = 16384;
 // 单连接输入缓冲上限, 防止慢速攻击耗尽内存
 static const size_t MAX_IN_BUFFER = 64 * 1024 * 1024;
 // 输出队列段数上限(背压保护)
@@ -193,8 +194,8 @@ static Router& getRouter()
 
 // ==================== HttpServer 实现 ====================
 
-HttpServer::HttpServer(int fd, TcpServer* server, std::string clientIp)
-    : _fd(fd), _server(server), _clientIp(std::move(clientIp)),
+HttpServer::HttpServer(int fd, EventLoop* loop, std::string clientIp)
+    : _fd(fd), _loop(loop), _clientIp(std::move(clientIp)),
       _writeRegistered(false), _keepAlive(false), _closeAfterFlush(false), _closed(false)
 {
 }
@@ -210,6 +211,7 @@ void HttpServer::markClosed()
 }
 
 // 非阻塞读取直到 EAGAIN: 边缘触发(ET)模式下必须一次把可读数据全部读完
+// 注意: 本方法在所属 EventLoop 线程内调用, 无并发竞争
 void HttpServer::recvIntoBuffer()
 {
     char buf[RECV_BUF_SIZE];
@@ -219,18 +221,18 @@ void HttpServer::recvIntoBuffer()
             _inBuffer.append(buf, static_cast<size_t>(n));
             if (_inBuffer.size() > MAX_IN_BUFFER) {
                 LOG(WARNING, "输入缓冲超限, 关闭连接 fd: " + std::to_string(_fd));
-                _server->closeConnection(_fd);
+                _loop->closeConnection(_fd);
                 return;
             }
         } else if (n == 0) {
-            _server->closeConnection(_fd); // 对端主动关闭
+            _loop->closeConnection(_fd); // 对端主动关闭
             return;
         } else {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 return; // 数据已读尽
             }
             LOG(WARNING, "recv 错误 fd: " + std::to_string(_fd) + " errno: " + std::to_string(errno));
-            _server->closeConnection(_fd);
+            _loop->closeConnection(_fd);
             return;
         }
     }
@@ -238,11 +240,10 @@ void HttpServer::recvIntoBuffer()
 
 void HttpServer::handleRead()
 {
-    std::lock_guard<std::mutex> lock(_ioMutex);
     if (_closed.load()) return;
 
     recvIntoBuffer();
-    if (_closed.load()) return; // recv 过程中连接可能已被并发关闭
+    if (_closed.load()) return; // recv 过程中连接可能已被关闭
 
     processRequests();
     if (_closed.load()) return;
@@ -252,7 +253,6 @@ void HttpServer::handleRead()
 
 void HttpServer::handleWrite()
 {
-    std::lock_guard<std::mutex> lock(_ioMutex);
     if (_closed.load()) return;
     tryFlush();
 }
@@ -378,7 +378,7 @@ void HttpServer::tryFlush()
                     return;
                 } else {
                     LOG(WARNING, "send 错误 fd: " + std::to_string(_fd) + " errno: " + std::to_string(errno));
-                    _server->closeConnection(_fd);
+                    _loop->closeConnection(_fd);
                     return;
                 }
             }
@@ -396,7 +396,7 @@ void HttpServer::tryFlush()
                 return;
             } else {
                 LOG(WARNING, "sendfile 错误 fd: " + std::to_string(_fd) + " errno: " + std::to_string(errno));
-                _server->closeConnection(_fd);
+                _loop->closeConnection(_fd);
                 return;
             }
         }
@@ -410,7 +410,7 @@ void HttpServer::tryFlush()
         unregisterWrite();
     }
     if (_closeAfterFlush) {
-        _server->closeConnection(_fd);
+        _loop->closeConnection(_fd);
     }
 }
 
@@ -428,12 +428,12 @@ void HttpServer::registerWrite()
 {
     if (_writeRegistered) return;
     _writeRegistered = true;
-    _server->updateEvents(_fd, EPOLLIN | EPOLLET | EPOLLOUT);
+    _loop->updateEvents(_fd, EPOLLIN | EPOLLET | EPOLLOUT);
 }
 
 void HttpServer::unregisterWrite()
 {
     if (!_writeRegistered) return;
     _writeRegistered = false;
-    _server->updateEvents(_fd, EPOLLIN | EPOLLET);
+    _loop->updateEvents(_fd, EPOLLIN | EPOLLET);
 }
